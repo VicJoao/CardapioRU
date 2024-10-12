@@ -97,7 +97,7 @@ def process_pdf_to_data(pdf_path):
 
 @app.route('/api/meals', methods=['GET'])
 def get_meals():
-    pdf_path = '10c578b7-6c83-44bb-8680-c51b869ad8a2_ilovepdf-merged--1-.pdf'  # Altere para o caminho do seu PDF
+    pdf_path = 'static/cardapio.pdf'  # Altere para o caminho do seu PDF
     result_json = process_pdf_to_data(pdf_path)
     return jsonify(result_json)
 
