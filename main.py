@@ -1,17 +1,48 @@
 import pandas as pd
 from tabula import read_pdf
-import re
+from datetime import datetime
+from flask import Flask, jsonify
+from flask_cors import CORS  # Importa CORS
+
+app = Flask(__name__)
+CORS(app)
+
+# Mapeia meses abreviados para números
+months_map = {
+    'jan': 1,
+    'fev': 2,
+    'mar': 3,
+    'abr': 4,
+    'mai': 5,
+    'jun': 6,
+    'jul': 7,
+    'ago': 8,
+    'set': 9,
+    'out': 10,
+    'nov': 11,
+    'dez': 12
+}
 
 def clean_cell(cell):
     if isinstance(cell, str):
-        return cell.strip()
+        return cell.replace('\r', '').strip()  # Remove '\r' e espaços
     return cell
 
 def is_valid_date(date_string):
     try:
-        pd.to_datetime(date_string, format='%d/%m/%Y')
+        day, month = date_string.split('/')
+        month_num = months_map[month]  # Mapeia o mês abreviado para número
+        pd.to_datetime(f"{day}/{month_num}/2024", format='%d/%m/%Y')  # Define um ano fixo (2024)
         return True
-    except ValueError:
+    except (ValueError, KeyError):
+        return False
+
+def is_today(date_string):
+    try:
+        day, month = date_string.split('/')
+        month_num = months_map[month]
+        return pd.to_datetime(f"{day}/{month_num}/{datetime.today().year}", format='%d/%m/%Y').date() == datetime.today().date()
+    except (ValueError, KeyError):
         return False
 
 def make_unique_columns(df):
@@ -21,91 +52,54 @@ def make_unique_columns(df):
     df.columns = cols
     return df
 
-def is_new_table_title(text):
-    # Verifica se o texto inicia com "CARDÁPIO" e termina com um dos tipos de refeição
-    if isinstance(text, str):  # Verifica se text é uma string
-        pattern = r'^CARDÁPIO.*(ALMOÇO|JANTAR|DESJEJUM)$'
-        return re.match(pattern, text) is not None
-    return False
-
-def extract_text_from_page(pdf_path, page_number):
-    # Extrai o texto da página para verificar se há um título
-    text = read_pdf(pdf_path, pages=page_number, multiple_tables=False, pandas_options={'header': None})
-    if text:
-        return text[0].iloc[0, 0]  # Retorna o texto da primeira célula
-    return ""
-
 def process_pdf_to_data(pdf_path):
     try:
         # Lê todas as tabelas do PDF
         dfs = read_pdf(pdf_path, pages='all', multiple_tables=True, lattice=True)
 
-        all_data = []  # Lista para armazenar todas as tabelas processadas
-        current_table = None  # Tabela atual
-        current_title = ""  # Título atual da tabela
+        meals = {
+            "Café da Manhã": [],
+            "Almoço": [],
+            "Jantar": []
+        }
+        meal_index = 0
 
-        for i in range(len(dfs)):
-            df = dfs[i]
-            print(f"\nTabela {i + 1} extraída do PDF:")
-            print(df.head())  # Exibe as primeiras linhas de cada tabela extraída
-
+        for df in dfs:
             # Limpa os dados
             df = df.apply(lambda col: col.map(clean_cell) if col.dtype == 'object' else col)
 
             # Garante nomes de colunas únicos
             df = make_unique_columns(df)
 
-            # Extrai o texto da página atual para verificar se há um título
-            title_from_page = extract_text_from_page(pdf_path, i + 1)  # +1 porque as páginas começam em 1
-            if is_new_table_title(title_from_page):  # Se é um título de nova tabela
-                if current_table is not None:
-                    # Adiciona a tabela atual à lista antes de começar uma nova
-                    all_data.append(current_table)
+            # Filtra apenas as linhas com a data de hoje
+            df = df[df[df.columns[0]].apply(is_valid_date)]
+            today_rows = df[df[df.columns[0]].apply(is_today)]
 
-                # Atualiza a tabela atual com a nova
-                df.columns = df.iloc[0]  # Define a primeira linha como os nomes das colunas
-                current_table = df[1:]  # Remove a linha do título
-                current_title = title_from_page  # Atualiza o título atual
-            else:
-                # Se não é um novo título, continua a tabela anterior
-                if current_table is not None:
-                    # Adiciona a nova tabela à tabela atual
-                    df.columns = current_table.columns  # Alinha as colunas
-                    current_table = pd.concat([current_table, df], ignore_index=True)
+            # Organiza as refeições
+            if not today_rows.empty:
+                today_rows = today_rows.copy()
+                today_rows.fillna('N/A', inplace=True)
+                  # Inicia o índice de refeições
+                for i, row in today_rows.iterrows():
+                    meal_index += 1
+                    if (meal_index == 1):
+                        meals["Café da Manhã"].append(row.values[1:].tolist())
+                    elif (meal_index == 2):
+                        meals["Almoço"].append(row.values[1:].tolist())
+                    elif (meal_index == 3):
+                        meals["Jantar"].append(row.values[1:].tolist())
 
-            # Verifica se a primeira coluna é uma data válida e remove linhas inválidas
-            if current_table is not None:
-                current_table = current_table[current_table[current_table.columns[0]].apply(is_valid_date)]
-
-                # Preenche valores NaN com 'N/A' para exibição
-                current_table.fillna('N/A', inplace=True)
-
-                # Adiciona uma coluna de refeição e título
-                current_table.insert(0, 'Refeição', 'CARDÁPIO DE MARIO 2024 – UFV FLORESTAL – ALMOÇO')
-                current_table.insert(1, 'Título', current_title)  # Adiciona o título da tabela
-
-                # Reset index
-                current_table.reset_index(drop=True, inplace=True)
-
-        # Após o loop, adicione a última tabela se existir
-        if current_table is not None:
-            all_data.append(current_table)
-
-        # Verifica se all_data não está vazio antes de concatenar
-        if all_data:
-            final_df = pd.concat(all_data, ignore_index=True)
-            final_df.drop_duplicates(inplace=True)  # Remove duplicatas, se necessário
-            return final_df
-        else:
-            print("Nenhuma tabela foi extraída do PDF.")
-            return pd.DataFrame()  # Retorna um DataFrame vazio
+        return meals
 
     except Exception as e:
         print(f"Ocorreu um erro ao ler o PDF: {e}")
+        return {}
 
-# Exemplo de uso:
+@app.route('/api/meals', methods=['GET'])
+def get_meals():
+    pdf_path = '10c578b7-6c83-44bb-8680-c51b869ad8a2_ilovepdf-merged--1-.pdf'  # Altere para o caminho do seu PDF
+    result_json = process_pdf_to_data(pdf_path)
+    return jsonify(result_json)
+
 if __name__ == "__main__":
-    pdf_path = '10c578b7-6c83-44bb-8680-c51b869ad8a2_ilovepdf-merged--1-.pdf'  # Substitua pelo caminho do seu PDF
-    result_df = process_pdf_to_data(pdf_path)
-    print("\nDataFrame final:")
-    print(result_df)
+    app.run(debug=True)
