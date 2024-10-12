@@ -2,7 +2,9 @@ import pandas as pd
 from tabula import read_pdf
 from datetime import datetime
 from flask import Flask, jsonify
-from flask_cors import CORS  # Importa CORS
+from flask_cors import CORS
+import requests
+import os
 
 app = Flask(__name__)
 CORS(app)
@@ -52,8 +54,19 @@ def make_unique_columns(df):
     df.columns = cols
     return df
 
+def download_pdf(pdf_url, local_path):
+    response = requests.get(pdf_url)
+    with open(local_path, 'wb') as f:
+        f.write(response.content)
+
 def process_pdf_to_data(pdf_path):
     try:
+        # Se o caminho for um URL, faça o download do PDF
+        if pdf_path.startswith('http'):
+            local_pdf_path = 'static/cardapio.pdf'
+            download_pdf(pdf_path, local_pdf_path)
+            pdf_path = local_pdf_path  # Atualiza o caminho para o local
+
         # Lê todas as tabelas do PDF
         dfs = read_pdf(pdf_path, pages='all', multiple_tables=True, lattice=True)
 
@@ -79,14 +92,14 @@ def process_pdf_to_data(pdf_path):
             if not today_rows.empty:
                 today_rows = today_rows.copy()
                 today_rows.fillna('N/A', inplace=True)
-                  # Inicia o índice de refeições
+                # Inicia o índice de refeições
                 for i, row in today_rows.iterrows():
                     meal_index += 1
-                    if (meal_index == 1):
+                    if meal_index == 1:
                         meals["Café da Manhã"].append(row.values[1:].tolist())
-                    elif (meal_index == 2):
+                    elif meal_index == 2:
                         meals["Almoço"].append(row.values[1:].tolist())
-                    elif (meal_index == 3):
+                    elif meal_index == 3:
                         meals["Jantar"].append(row.values[1:].tolist())
 
         return meals
@@ -97,7 +110,7 @@ def process_pdf_to_data(pdf_path):
 
 @app.route('/api/meals', methods=['GET'])
 def get_meals():
-    pdf_path = 'static/cardapio.pdf'  # Altere para o caminho do seu PDF
+    pdf_path = 'static/cardapio.pdf'  # Caminho local para o PDF
     result_json = process_pdf_to_data(pdf_path)
     return jsonify(result_json)
 
