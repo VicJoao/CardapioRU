@@ -110,7 +110,7 @@ def process_pdf_to_data(pdf_path):
 
 @app.route('/api/meals', methods=['GET'])
 def get_meals():
-    pdf_path = 'static/cardapio.pdf'  # Caminho local para o PDF
+    pdf_path = 'https://cardapioru.onrender.com/static/cardapio.pdf'  # Caminho local para o PDF
     result_json = process_pdf_to_data(pdf_path)
     return jsonify(result_json)
 
