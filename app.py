@@ -1,5 +1,5 @@
 import pandas as pd
-from tabula import read_pdf
+import pdfplumber
 from datetime import datetime
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -10,7 +10,7 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-# Configuring logging
+# Configurando logging
 logging.basicConfig(level=logging.INFO)
 
 # Mapeia meses abreviados para números
@@ -29,88 +29,95 @@ months_map = {
     'dez': 12
 }
 
+
 def clean_cell(cell):
-    """Removes unwanted characters from a cell."""
+    """Remove caracteres indesejados de uma célula."""
     if isinstance(cell, str):
-        return cell.replace('\r', '').strip()  # Remove '\r' and spaces
+        return cell.replace('\r', '').strip()  # Remove '\r' e espaços
     return cell
 
+
 def is_valid_date(date_string):
-    """Checks if the date string is in the valid format."""
+    """Verifica se a string da data está no formato válido."""
     try:
         day, month = date_string.split('/')
-        month_num = months_map[month]  # Maps abbreviated month to number
-        pd.to_datetime(f"{day}/{month_num}/2024", format='%d/%m/%Y')  # Sets a fixed year (2024)
+        month_num = months_map[month]  # Mapeia o mês abreviado para número
+        pd.to_datetime(f"{day}/{month_num}/2024", format='%d/%m/%Y')  # Define um ano fixo (2024)
         return True
     except (ValueError, KeyError):
         return False
 
+
 def is_today(date_string):
-    """Checks if the date string is today's date."""
+    """Verifica se a string da data é a data de hoje."""
     try:
         day, month = date_string.split('/')
         month_num = months_map[month]
-        return pd.to_datetime(f"{day}/{month_num}/{datetime.today().year}", format='%d/%m/%Y').date() == datetime.today().date()
+        return pd.to_datetime(f"{day}/{month_num}/{datetime.today().year}",
+                              format='%d/%m/%Y').date() == datetime.today().date()
     except (ValueError, KeyError):
         return False
 
+
 def make_unique_columns(df):
-    """Ensures that column names in the DataFrame are unique."""
+    """Garante que os nomes das colunas no DataFrame sejam únicos."""
     cols = pd.Series(df.columns)
     for dup in cols[cols.duplicated()].unique():
-        cols[cols[cols == dup].index.values.tolist()] = [dup + '_' + str(i) if i != 0 else dup for i in range(sum(cols == dup))]
+        cols[cols[cols == dup].index.values.tolist()] = [dup + '_' + str(i) if i != 0 else dup for i in
+                                                         range(sum(cols == dup))]
     df.columns = cols
     return df
 
+
 def download_pdf(pdf_url, local_path):
-    """Downloads a PDF from a URL to a local path."""
+    """Baixa um PDF de uma URL para um caminho local."""
     response = requests.get(pdf_url)
     with open(local_path, 'wb') as f:
         f.write(response.content)
 
+
 def process_pdf_to_data(pdf_path):
-    """Processes the PDF and extracts meal data."""
+    """Processa o PDF e extrai dados das refeições."""
+    meals = {
+        "Café da Manhã": [],
+        "Almoço": [],
+        "Jantar": []
+    }
+
     try:
-        # If the path is a URL, download the PDF
+        # Se o caminho for um URL, baixe o PDF
         if pdf_path.startswith('http'):
             local_pdf_path = 'static/cardapio.pdf'
             download_pdf(pdf_path, local_pdf_path)
-            pdf_path = local_pdf_path  # Update the path to local
+            pdf_path = local_pdf_path  # Atualiza o caminho para o local
 
-        # Reads all tables from the PDF
-        dfs = read_pdf(pdf_path, pages='all', multiple_tables=True, lattice=True)
+        with pdfplumber.open(pdf_path) as pdf:
+            meal_index = 0
 
-        meals = {
-            "Café da Manhã": [],
-            "Almoço": [],
-            "Jantar": []
-        }
-        meal_index = 0
+            for page in pdf.pages:
+                # Extrai as tabelas da página
+                tables = page.extract_tables()
 
-        for df in dfs:
-            # Clean the data
-            df = df.apply(lambda col: col.map(clean_cell) if col.dtype == 'object' else col)
+                for table in tables:
+                    df = pd.DataFrame(table[1:], columns=table[0])
+                    df = df.apply(lambda col: col.map(clean_cell) if col.dtype == 'object' else col)
+                    df = make_unique_columns(df)
 
-            # Ensure unique column names
-            df = make_unique_columns(df)
+                    # Filtra apenas as linhas com a data de hoje
+                    df = df[df[df.columns[0]].apply(is_valid_date)]
+                    today_rows = df[df[df.columns[0]].apply(is_today)]
 
-            # Filter only rows with today's date
-            df = df[df[df.columns[0]].apply(is_valid_date)]
-            today_rows = df[df[df.columns[0]].apply(is_today)]
-
-            # Organize meals
-            if not today_rows.empty:
-                today_rows = today_rows.copy()
-                today_rows.fillna('N/A', inplace=True)
-                # Initialize meal index
-                for i, row in today_rows.iterrows():
-                    meal_index += 1
-                    if meal_index == 1:
-                        meals["Café da Manhã"].append(row.values[1:].tolist())
-                    elif meal_index == 2:
-                        meals["Almoço"].append(row.values[1:].tolist())
-                    elif meal_index == 3:
-                        meals["Jantar"].append(row.values[1:].tolist())
+                    # Organiza as refeições
+                    if not today_rows.empty:
+                        today_rows.fillna('N/A', inplace=True)
+                        for i, row in today_rows.iterrows():
+                            meal_index += 1
+                            if meal_index == 1:
+                                meals["Café da Manhã"].append(row.values[1:].tolist())
+                            elif meal_index == 2:
+                                meals["Almoço"].append(row.values[1:].tolist())
+                            elif meal_index == 3:
+                                meals["Jantar"].append(row.values[1:].tolist())
 
         return meals
 
@@ -118,17 +125,20 @@ def process_pdf_to_data(pdf_path):
         logging.error(f"Ocorreu um erro ao ler o PDF: {e}")
         return {}
 
+
 @app.route('/api/meals', methods=['GET'])
 def get_meals():
-    """API endpoint to retrieve meal data."""
-    pdf_path = 'https://cardapioru.onrender.com/static/cardapio.pdf'  # Local path for the PDF
+    """Endpoint da API para recuperar dados das refeições."""
+    pdf_path = 'https://cardapioru.onrender.com/static/cardapio.pdf'  # Caminho local para o PDF
     result_json = process_pdf_to_data(pdf_path)
     return jsonify(result_json)
 
+
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint to confirm the service is running."""
+    """Endpoint de verificação de saúde para confirmar que o serviço está em execução."""
     return jsonify({"status": "healthy"})
 
+
 if __name__ == "__main__":
-    app.run(debug=True, port=int(os.getenv('PORT', 5000)))  # Use PORT from environment variable or default to 5000
+    app.run(debug=True, port=int(os.getenv('PORT', 5000)))  # Usa o PORT da variável de ambiente ou padrão 5000

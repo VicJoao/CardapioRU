@@ -1,7 +1,7 @@
 Flask==2.3.2
 Flask-CORS==3.0.10
 pandas==1.5.3
-tabula-py==2.3.0
+pdfplumber==0.7.0
 gunicorn==20.1.0
 numpy==1.23.5
 Werkzeug==2.3.4
