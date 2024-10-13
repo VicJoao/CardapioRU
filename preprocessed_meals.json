@@ -1,0 +1,40 @@
+{
+    "Café da Manhã": [
+        [
+            "DOM",
+            "PÃO DE SAL",
+            "MANTEIGA",
+            "BEBIDA LÁCTEA DE CHOCOLATE",
+            "",
+            "LARANJA"
+        ]
+    ],
+    "Almoço": [
+        [
+            "DOM",
+            "FILE DE PEIXE A MILANESA (file\nde tilapia/merluza)",
+            "SOJA COM LEGUMES",
+            "PIRÃO DE OVOS",
+            "SIMPLES",
+            "SIMPLES",
+            "COUVE",
+            "TOMATE (redelas)",
+            "BATATA DOCE COZIDA\n(saute)",
+            "MELANCIA"
+        ]
+    ],
+    "Jantar": [
+        [
+            "DOM",
+            "ESPETO MISTO (sassami e pernil)",
+            "OVOS FRITOS",
+            "BATATA GRATINADA",
+            "SIMPLES",
+            "SIMPLES",
+            "MIX DE FOLHAS\n(couve c/ alface)",
+            "MORANGA RALADA",
+            "BETERRABA COZIDA",
+            "PUDIM"
+        ]
+    ]
+}

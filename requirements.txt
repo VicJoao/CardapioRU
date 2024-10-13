@@ -6,3 +6,4 @@ gunicorn==20.1.0
 numpy==1.23.5
 Werkzeug==2.3.4
 requests==2.26.0
+APScheduler==3.10.4

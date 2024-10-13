@@ -6,6 +6,8 @@ from flask_cors import CORS
 import requests
 import logging
 import os
+import json
+from apscheduler.schedulers.background import BackgroundScheduler
 
 app = Flask(__name__)
 CORS(app)
@@ -29,6 +31,9 @@ months_map = {
     'dez': 12
 }
 
+# Caminho para armazenar os dados pré-processados
+DATA_FILE = 'preprocessed_meals.json'
+
 
 def clean_cell(cell):
     """Remove caracteres indesejados de uma célula."""
@@ -41,7 +46,7 @@ def is_valid_date(date_string):
     """Verifica se a string da data está no formato válido."""
     try:
         day, month = date_string.split('/')
-        month_num = months_map[month]  # Mapeia o mês abreviado para número
+        month_num = months_map[month.lower()]  # Mapeia o mês abreviado para número
         pd.to_datetime(f"{day}/{month_num}/2024", format='%d/%m/%Y')  # Define um ano fixo (2024)
         return True
     except (ValueError, KeyError):
@@ -52,7 +57,7 @@ def is_today(date_string):
     """Verifica se a string da data é a data de hoje."""
     try:
         day, month = date_string.split('/')
-        month_num = months_map[month]
+        month_num = months_map[month.lower()]
         return pd.to_datetime(f"{day}/{month_num}/{datetime.today().year}",
                               format='%d/%m/%Y').date() == datetime.today().date()
     except (ValueError, KeyError):
@@ -105,11 +110,11 @@ def process_pdf_to_data(pdf_path):
 
                     # Filtra apenas as linhas com a data de hoje
                     df = df[df[df.columns[0]].apply(is_valid_date)]
-                    today_rows = df[df[df.columns[0]].apply(is_today)]
+                    today_rows = df[df[df.columns[0]].apply(is_today)].copy()  # Adiciona .copy()
 
                     # Organiza as refeições
                     if not today_rows.empty:
-                        today_rows.fillna('N/A', inplace=True)
+                        today_rows = today_rows.fillna('N/A')  # Evita inplace
                         for i, row in today_rows.iterrows():
                             meal_index += 1
                             if meal_index == 1:
@@ -119,19 +124,40 @@ def process_pdf_to_data(pdf_path):
                             elif meal_index == 3:
                                 meals["Jantar"].append(row.values[1:].tolist())
 
-        return meals
-
     except Exception as e:
         logging.error(f"Ocorreu um erro ao ler o PDF: {e}")
         return {}
+
+    return meals
+
+
+def update_meals_data():
+    """Função agendada para atualizar os dados das refeições diariamente."""
+    pdf_url = 'https://cardapioru.onrender.com/static/cardapio.pdf'  # URL do PDF
+    logging.info("Iniciando o processamento diário do PDF.")
+    data = process_pdf_to_data(pdf_url)
+    try:
+        with open(DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        logging.info("Dados das refeições atualizados com sucesso.")
+    except Exception as e:
+        logging.error(f"Erro ao salvar os dados das refeições: {e}")
 
 
 @app.route('/api/meals', methods=['GET'])
 def get_meals():
     """Endpoint da API para recuperar dados das refeições."""
-    pdf_path = 'https://cardapioru.onrender.com/static/cardapio.pdf'  # Caminho local para o PDF
-    result_json = process_pdf_to_data(pdf_path)
-    return jsonify(result_json)
+    if not os.path.exists(DATA_FILE):
+        logging.info("Dados pré-processados não encontrados. Processando agora.")
+        update_meals_data()
+
+    try:
+        with open(DATA_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return jsonify(data)
+    except Exception as e:
+        logging.error(f"Erro ao ler os dados pré-processados: {e}")
+        return jsonify({"error": "Não foi possível recuperar os dados das refeições."}), 500
 
 
 @app.route('/health', methods=['GET'])
@@ -141,4 +167,16 @@ def health_check():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=int(os.getenv('PORT', 5000)))  # Usa o PORT da variável de ambiente ou padrão 5000
+    # Configurar o scheduler
+    scheduler = BackgroundScheduler()
+    # Agendar a função para rodar diariamente às 00:00
+    scheduler.add_job(update_meals_data, 'cron', hour=0, minute=0)
+    scheduler.start()
+
+    # Atualizar os dados imediatamente na inicialização
+    update_meals_data()
+
+    try:
+        app.run(debug=True, port=int(os.getenv('PORT', 5000)))  # Usa o PORT da variável de ambiente ou padrão 5000
+    except (KeyboardInterrupt, SystemExit):
+        scheduler.shutdown()
