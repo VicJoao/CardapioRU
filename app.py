@@ -34,6 +34,7 @@ months_map = {
 # Caminho para armazenar os dados pré-processados
 DATA_FILE = 'preprocessed_meals.json'
 
+meals_data = {}
 
 def clean_cell(cell):
     """Remove caracteres indesejados de uma célula."""
@@ -83,7 +84,8 @@ def download_pdf(pdf_url, local_path):
 
 def process_pdf_to_data(pdf_path):
     """Processa o PDF e extrai dados das refeições."""
-    meals = {
+    global meals_data
+    meals_data = {
         "Café da Manhã": [],
         "Almoço": [],
         "Jantar": []
@@ -118,17 +120,17 @@ def process_pdf_to_data(pdf_path):
                         for i, row in today_rows.iterrows():
                             meal_index += 1
                             if meal_index == 1:
-                                meals["Café da Manhã"].append(row.values[1:].tolist())
+                                meals_data["Café da Manhã"].append(row.values[1:].tolist())
                             elif meal_index == 2:
-                                meals["Almoço"].append(row.values[1:].tolist())
+                                meals_data["Almoço"].append(row.values[1:].tolist())
                             elif meal_index == 3:
-                                meals["Jantar"].append(row.values[1:].tolist())
+                                meals_data["Jantar"].append(row.values[1:].tolist())
 
     except Exception as e:
         logging.error(f"Ocorreu um erro ao ler o PDF: {e}")
         return {}
 
-    return meals
+    return meals_data
 
 
 def update_meals_data():
@@ -147,17 +149,20 @@ def update_meals_data():
 @app.route('/api/meals', methods=['GET'])
 def get_meals():
     """Endpoint da API para recuperar dados das refeições."""
-    if not os.path.exists(DATA_FILE):
+    global meals_data
+    if not meals_data and not os.path.exists(DATA_FILE):
         logging.info("Dados pré-processados não encontrados. Processando agora.")
         update_meals_data()
 
-    try:
-        with open(DATA_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        return jsonify(data)
-    except Exception as e:
-        logging.error(f"Erro ao ler os dados pré-processados: {e}")
-        return jsonify({"error": "Não foi possível recuperar os dados das refeições."}), 500
+    if not meals_data:
+        try:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                meals_data = json.load(f)
+        except Exception as e:
+            logging.error(f"Erro ao ler os dados pré-processados: {e}")
+            return jsonify({"error": "Não foi possível recuperar os dados das refeições."}), 500
+
+    return jsonify(meals_data)
 
 
 @app.route('/health', methods=['GET'])
